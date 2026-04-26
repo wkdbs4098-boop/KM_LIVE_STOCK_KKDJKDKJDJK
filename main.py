@@ -6,9 +6,16 @@ from datetime import datetime
 import requests
 import streamlit.components.v1 as components
 
-# --- 텔레그램 설정 (실제 값을 꼭 입력하세요!) ---
-TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
-TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
+# --- 텔레그램 설정 (수정본: 내 PC & 클라우드 공용) ---
+try:
+    # 1. 클라우드(Streamlit Cloud) 보안 설정 확인
+    TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
+    TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
+except Exception:
+    # 2. 내 PC에서 실행할 때 (에러 방지용 직접 입력)
+    # 아래 따옴표 안에 자윤님의 실제 토큰과 ID를 적어주세요.
+    TELEGRAM_TOKEN = "" 
+    TELEGRAM_CHAT_ID = ""
 
 def send_telegram_msg(message):
     try:
