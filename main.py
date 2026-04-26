@@ -178,14 +178,27 @@ elif app_mode == "실시간 감시 (현재 시장 감시)":
             for i in range(0, total_count, batch_size):
                 batch_tickers = ALL_TICKERS[i:i+batch_size]
                 try:
+                    # 데이터 다운로드
                     df_all = yf.download(batch_tickers, period="1d", interval="1m", progress=False, group_by='ticker', prepost=True)
                     
                     for ticker in batch_tickers:
+                        # 1. 해당 종목 데이터 추출
                         df_live = df_all[ticker] if len(batch_tickers) > 1 else df_all
-                        if df_live.empty or len(df_live) < 21: continue
                         
+                        # --- 필터링 & 터미널 표시 ---
+                        if df_live.empty or df_live['Close'].isnull().all():
+                            print(f"❌ {ticker}: 데이터 없음 (상폐 또는 유령 종목)")
+                            continue 
+
+                        if len(df_live) < 21:
+                            print(f"⚠️ {ticker}: 데이터 부족 (현재 {len(df_live)}개)")
+                            continue
+                        # --------------------------
+                        
+                        # 2. 전략 검사
                         is_hit, v_ratio, _ = check_strategy(df_live, ticker)
                         
+                        # 3. 포착 시 알림 로직
                         if is_hit and ticker not in st.session_state.already_sent:
                             with mon_results:
                                 st.success(f"🎯 **{ticker}** 포착! | 거래량: {v_ratio:.1f}배 | {current_time}")
@@ -195,7 +208,15 @@ elif app_mode == "실시간 감시 (현재 시장 감시)":
                             msg = f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n시간: {current_time}"
                             send_telegram_msg(msg)
                             st.session_state.already_sent.add(ticker)
-                            
-                except: continue
+                    
+                    # [매우 중요] 20개마다 서버 휴식 (차단 방지)
+                    time.sleep(1.5)
+
+                except Exception as e:
+                    print(f"🚨 에러 발생 ({ticker}): {e}")
+                    time.sleep(2)
+                    continue
             
+            # 전 종목 한 바퀴 돌고 나면 1분 휴식
+            mon_status.info(f"✅ 한 바퀴 완료! 60초 대기 후 다시 시작합니다. ({current_time})")
             time.sleep(60)
