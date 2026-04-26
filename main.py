@@ -169,39 +169,40 @@ elif app_mode == "실시간 감시 (현재 시장 감시)":
 
     if st.button("📡 실시간 무한 감시 시작"):
         batch_size = 20 
-        total_count = len(ALL_TICKERS)
+        # 1. 프로그램 실행 중 상폐 종목을 기억할 쓰레기통 생성
+        if 'black_list' not in st.session_state:
+            st.session_state.black_list = set()
         
         while True:
+            # 2. 전체 종목에서 블랙리스트(상폐)는 제외하고 스캔 시작
+            scan_targets = [t for t in ALL_TICKERS if t not in st.session_state.black_list]
+            total_count = len(scan_targets)
             current_time = datetime.now().strftime('%H:%M:%S')
-            mon_status.warning(f"⏱️ {total_count}개 전 종목 스캔 중... (업데이트: {current_time})")
+            mon_status.warning(f"⏱️ {total_count}개 종목 스캔 중... (제외된 상폐 종목: {len(st.session_state.black_list)}개)")
             
             for i in range(0, total_count, batch_size):
-                batch_tickers = ALL_TICKERS[i:i+batch_size]
+                batch_tickers = scan_targets[i:i+batch_size]
                 try:
-                    # 데이터 다운로드
                     df_all = yf.download(batch_tickers, period="1d", interval="1m", progress=False, group_by='ticker', prepost=True)
                     
                     for ticker in batch_tickers:
-                        # 1. 해당 종목 데이터 추출
+                        # 데이터 추출
                         df_live = df_all[ticker] if len(batch_tickers) > 1 else df_all
                         
-                        # --- 필터링 & 터미널 표시 ---
+                        # --- [핵심] 상폐/유령 종목 자동 판별 및 블랙리스트 등록 ---
                         if df_live.empty or df_live['Close'].isnull().all():
-                            print(f"❌ {ticker}: 데이터 없음 (상폐 또는 유령 종목)")
+                            print(f"❌ {ticker}: 데이터 없음 -> 블랙리스트 등록 (다음 바퀴부터 제외)")
+                            st.session_state.black_list.add(ticker)
                             continue 
-
-                        if len(df_live) < 21:
-                            print(f"⚠️ {ticker}: 데이터 부족 (현재 {len(df_live)}개)")
+                        
+                        if len(df_live) < 21: 
                             continue
-                        # --------------------------
                         
-                        # 2. 전략 검사
+                        # 전략 검사 및 알림
                         is_hit, v_ratio, _ = check_strategy(df_live, ticker)
-                        
-                        # 3. 포착 시 알림 로직
                         if is_hit and ticker not in st.session_state.already_sent:
                             with mon_results:
-                                st.success(f"🎯 **{ticker}** 포착! | 거래량: {v_ratio:.1f}배 | {current_time}")
+                                st.success(f"🎯 **{ticker}** 포착! | {v_ratio:.1f}배 | {current_time}")
                                 st.toast(f"{ticker} 포착!", icon="🔥")
                             
                             play_sound()
@@ -209,14 +210,13 @@ elif app_mode == "실시간 감시 (현재 시장 감시)":
                             send_telegram_msg(msg)
                             st.session_state.already_sent.add(ticker)
                     
-                    # [매우 중요] 20개마다 서버 휴식 (차단 방지)
-                    time.sleep(1.5)
+                    # 20개마다 서버 휴식
+                    time.sleep(1.5) 
 
                 except Exception as e:
-                    print(f"🚨 에러 발생 ({ticker}): {e}")
+                    print(f"🚨 에러 발생: {e}")
                     time.sleep(2)
                     continue
             
-            # 전 종목 한 바퀴 돌고 나면 1분 휴식
-            mon_status.info(f"✅ 한 바퀴 완료! 60초 대기 후 다시 시작합니다. ({current_time})")
+            # 한 바퀴 완료 후 1분 휴식
             time.sleep(60)
