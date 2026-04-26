@@ -168,7 +168,7 @@ elif app_mode == "실시간 감시 (현재 시장 감시)":
     mon_results = st.container()
 
     if st.button("📡 실시간 무한 감시 시작"):
-        batch_size = 50 
+        batch_size = 20 
         total_count = len(ALL_TICKERS)
         
         while True:
