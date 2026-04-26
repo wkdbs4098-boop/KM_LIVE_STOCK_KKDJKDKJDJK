@@ -7,8 +7,8 @@ import requests
 import streamlit.components.v1 as components
 
 # --- 텔레그램 설정 (실제 값을 꼭 입력하세요!) ---
-TELEGRAM_TOKEN = "8412933866:AAH_T8cDSinC5-8WwFgIOG4fqL7zUyfLnS0"
-TELEGRAM_CHAT_ID = "8030435997"
+TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
+TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 
 def send_telegram_msg(message):
     try:
