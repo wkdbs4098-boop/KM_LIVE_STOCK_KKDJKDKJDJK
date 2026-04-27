@@ -118,23 +118,24 @@ def get_safe_val(data):
 def check_strategy(df, ticker):
     if df is None or len(df) < 20: return False, 0, 0
     try:
-        curr_close = get_safe_val(df['Close'].iloc[-1])
-        curr_vol = get_safe_val(df['Volume'].iloc[-1])
+        curr_close = get_safe_val(df['Close'])
+        curr_vol = get_safe_val(df['Volume'])
         vol_avg = df['Volume'].iloc[-6:-1].mean()
         if isinstance(vol_avg, pd.Series): vol_avg = vol_avg.iloc[0]
         if vol_avg == 0: return False, 0, 0
         vol_ratio = curr_vol / vol_avg
         curr_value = curr_close * curr_vol
-        ma5 = get_safe_val(df['Close'].rolling(window=5).mean()).iloc[-1]
-        ma20 = get_safe_val(df['Close'].rolling(window=10).mean()).iloc[-1]
-        std20 = get_safe_val(df['Close'].rolling(window=10).std()).iloc[-1]
+        ma5 = get_safe_val(df['Close'].rolling(window=5).mean())
+        ma20 = get_safe_val(df['Close'].rolling(window=10).mean())
+        std20 = get_safe_val(df['Close'].rolling(window=10).std())
         upper_band = ma20 + (std20 * 2)
         
         c1 = vol_ratio >= VOL_RATIO_THRESHOLD
         c2 = curr_close > upper_band
         c3 = curr_close > ma5
         c4 = curr_value >= MIN_VALUE_THRESHOLD
-        return True, vol_ratio, curr_close
+        #return True, vol_ratio, curr_close 테스트용
+        return (c1 and c2 and c3 and c4), vol_ratio, 
     except: return False, 0, 0
 
 # --- 감시 엔진 ---
