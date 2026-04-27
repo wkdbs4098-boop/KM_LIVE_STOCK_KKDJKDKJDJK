@@ -4,7 +4,6 @@ import pandas as pd
 import time
 from datetime import datetime
 import requests
-import streamlit.components.v1 as components
 import os
 import threading
 
@@ -13,7 +12,7 @@ class GlobalState:
     def __init__(self):
         self.progress_text = "준비 중..."
         self.progress_perc = 0
-        self.hit_list = []  # 포착된 종목들 저장
+        self.hit_list = []  
         self.is_running = False
 
     def add_hit(self, ticker, v_ratio, price):
@@ -24,7 +23,6 @@ class GlobalState:
             "현재가": round(price, 2)
         }
         self.hit_list.append(new_hit)
-        # 즉시 CSV 저장 (자동 저장)
         df_new = pd.DataFrame([new_hit])
         if not os.path.exists("captured_stocks.csv"):
             df_new.to_csv("captured_stocks.csv", index=False, encoding='utf-8-sig')
@@ -34,7 +32,25 @@ class GlobalState:
 if "gs" not in st.session_state:
     st.session_state.gs = GlobalState()
 
-# --- [1] 블랙리스트 영구 저장소 ---
+# --- [1] 상위 2000개 티커 가져오기 (핵심 함수) ---
+@st.cache_data(ttl=86400)
+def get_top_2000_tickers():
+    try:
+        url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
+        all_data = pd.read_csv(url, header=None)[0].tolist()
+        valid_tickers = [str(t).strip().upper() for t in all_data if str(t).isalpha()]
+        
+        # 우량주 우선 배치
+        blue_chips = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "BRK-B", "AVGO", "LLY"]
+        final_list = blue_chips + [t for t in valid_tickers if t not in blue_chips]
+        return final_list[:2000]
+    except:
+        return ["AAPL", "TSLA", "NVDA", "AMD", "MSFT", "GOOGL", "AMZN", "META"]
+
+# 모든 티커 리스트 준비
+ALL_TICKERS = get_top_2000_tickers()
+
+# --- [2] 블랙리스트 명단 ---
 HARD_BLACKLIST = [
     "AACBR", "AACBU", "AACIW", "AACO", "AACOU", "AACPU", "ADAC", "ADACW", "AHL", "AIMDW",
     "AKO", "ALCY", "ALDF", "ALDFU", "ALDFW", "ALFUU", "ALIS", "ALISR", "ALOV", "ALOVU",
@@ -66,7 +82,6 @@ HARD_BLACKLIST = [
     "XSLLU", "Y", "ZKP", "ZOOZW"
 ]
 
-# --- [2] 블랙리스트 관리 함수 ---
 def load_blacklist():
     blacklist = set(HARD_BLACKLIST)
     if os.path.exists("blacklist.txt"):
@@ -74,7 +89,7 @@ def load_blacklist():
             blacklist.update(line.strip() for line in f if line.strip())
     return blacklist
 
-# --- 텔레그램 설정 ---
+# --- [3] 텔레그램 설정 ---
 try:
     TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
     TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
@@ -89,23 +104,12 @@ def send_telegram_msg(message):
         requests.get(url, params=params, timeout=5)
     except: pass
 
-# --- 설정 및 데이터 호출 ---
+# --- [4] 화면 UI 설정 ---
 st.set_page_config(page_title="자윤 Stock AI V3.5", layout="wide")
 st.title("🚀 미국 주식 24H 전수조사 시스템")
 
-VOL_RATIO_THRESHOLD = 0.1
-MIN_VALUE_THRESHOLD = 10 
-
-@st.cache_data(ttl=86400)
-def get_all_market_tickers():
-    try:
-        url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
-        tickers = pd.read_csv(url, header=None)[0].tolist()
-        return sorted(list(set([str(t).strip().upper() for t in tickers if str(t).isalpha()])))
-    except:
-        return ["AAPL", "TSLA", "NVDA", "AMD", "MSFT"]
-
-ALL_TICKERS = get_all_market_tickers()
+VOL_RATIO_THRESHOLD = 2.0  # 거래량 2배 이상 (테스트 완료 후 조정)
+MIN_VALUE_THRESHOLD = 100  # 최소 거래대금
 
 def get_safe_val(data):
     if isinstance(data, (pd.Series, pd.DataFrame)):
@@ -116,39 +120,39 @@ def get_safe_val(data):
     return float(data)
 
 def check_strategy(df, ticker):
-    if df is None or len(df) < 20: return False, 0, 0
+    if df is None or len(df) < 30: return False, 0, 0
     try:
         curr_close = get_safe_val(df['Close'])
         curr_vol = get_safe_val(df['Volume'])
         vol_avg = df['Volume'].iloc[-6:-1].mean()
-        if isinstance(vol_avg, pd.Series): vol_avg = vol_avg.iloc[0]
         if vol_avg == 0: return False, 0, 0
         vol_ratio = curr_vol / vol_avg
-        curr_value = curr_close * curr_vol
+        
         ma5 = get_safe_val(df['Close'].rolling(window=5).mean())
-        ma20 = get_safe_val(df['Close'].rolling(window=10).mean())
-        std20 = get_safe_val(df['Close'].rolling(window=10).std())
+        ma20 = get_safe_val(df['Close'].rolling(window=20).mean())
+        std20 = get_safe_val(df['Close'].rolling(window=20).std())
         upper_band = ma20 + (std20 * 2)
+        
+        curr_value = (curr_close * curr_vol) / 1000 
         
         c1 = vol_ratio >= VOL_RATIO_THRESHOLD
         c2 = curr_close > upper_band
         c3 = curr_close > ma5
         c4 = curr_value >= MIN_VALUE_THRESHOLD
-        #return True, vol_ratio, curr_close 테스트용
-        return (c1 and c2 and c3 and c4), vol_ratio, 
+        
+        return (c1 and c2 and c3 and c4), vol_ratio, curr_close
     except: return False, 0, 0
 
-# --- 감시 엔진 ---
+# --- [5] 감시 엔진 ---
 def monitor_engine(state_obj):
     already_sent_today = set()
     blacklist = load_blacklist()
     tickers = ALL_TICKERS
-    print(f"🚀 [엔진] 감시 시작 (대상: {len(tickers)}개)", flush=True)
     
     while True:
         scan_targets = [t for t in tickers if t not in blacklist]
         total_count = len(scan_targets)
-        batch_size = 20 
+        batch_size = 25 
 
         for i in range(0, total_count, batch_size):
             batch = scan_targets[i:i+batch_size]
@@ -157,12 +161,10 @@ def monitor_engine(state_obj):
             state_obj.progress_text = f"스캔 중: {progress_count} / {total_count} ({state_obj.progress_perc*100:.1f}%)"
 
             try:
-                # 1. 데이터 다운로드
-                df_all = yf.download(batch, period="7d", interval="5m", progress=False, group_by='ticker', prepost=True, threads=False, timeout=15)
+                df_all = yf.download(batch, period="25d", interval="30m", progress=False, group_by='ticker', prepost=True, timeout=15)
                 
                 for ticker in batch:
                     try:
-                        # 2. 데이터 추출 (xs 사용으로 nan 방지)
                         if len(batch) > 1:
                             if ticker not in df_all.columns.get_level_values(0): continue
                             df = df_all.xs(ticker, axis=1, level=0)
@@ -170,43 +172,31 @@ def monitor_engine(state_obj):
                             df = df_all
                         
                         if df is None or df.empty: continue
-                        
-                        # 3. 데이터 정제 (nan 행 제거)
                         df = df.dropna(subset=['Close', 'Volume'])
                         
-                        # 4. 최소 데이터 확인 및 중복 알림 방지
                         if len(df) < 30 or ticker in already_sent_today: continue
                         
-                        # [가장 중요!] 5. 전략 계산 호출 (이 부분이 빠져있었습니다)
                         is_hit, v_ratio, price = check_strategy(df, ticker)
                         
                         if is_hit:
-                            print(f"🔥 [포착] {ticker} | {v_ratio:.1f}배", flush=True)
-                            send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n가격: ${price:.2f}\n시간: {datetime.now().strftime('%H:%M:%S')}")
+                            send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n가격: ${price:.2f}")
                             state_obj.add_hit(ticker, v_ratio, price)
                             already_sent_today.add(ticker)
-                    except Exception as e:
-                        # 개별 종목 에러는 무시하고 다음 종목으로
-                        continue
-                
-                time.sleep(1) # 배치 간 약간의 휴식
+                    except: continue
+                time.sleep(1)
             except Exception as e:
                 if "Rate limited" in str(e):
-                    state_obj.progress_text = "⚠️ 차단 감지! 10분 휴식..."
                     time.sleep(600)
                 continue
         
         state_obj.progress_text = f"✅ {datetime.now().strftime('%H:%M:%S')} 완주! 90초 후 재시작"
         time.sleep(90)
 
-# --- 실행 로직 ---
+# --- [6] 실행 및 UI ---
 if "engine_run" not in st.session_state:
     if not any(t.name == "StockEngine" for t in threading.enumerate()):
         threading.Thread(target=monitor_engine, args=(st.session_state.gs,), name="StockEngine", daemon=True).start()
     st.session_state.engine_run = True
-
-# --- 메인 UI ---
-st.success("실시간 감시 엔진이 백그라운드에서 가동 중입니다.")
 
 col1, col2 = st.columns([1, 1])
 with col1:
@@ -219,8 +209,6 @@ with col2:
     if st.session_state.gs.hit_list:
         df_hits = pd.DataFrame(st.session_state.gs.hit_list)
         st.table(df_hits.tail(10))
-        csv = df_hits.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 데이터 다운로드", csv, "hits.csv", "text/csv")
     else:
         st.write("포착 대기 중...")
 
