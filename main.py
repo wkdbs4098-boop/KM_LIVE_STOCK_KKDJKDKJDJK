@@ -134,7 +134,7 @@ def check_strategy(df, ticker):
         c2 = curr_close > upper_band
         c3 = curr_close > ma5
         c4 = curr_value >= MIN_VALUE_THRESHOLD
-        return (c1 and c2 and c3 and c4), vol_ratio, curr_close
+        return True, vol_ratio, curr_close
     except: return False, 0, 0
 
 # --- 감시 엔진 ---
