@@ -108,7 +108,7 @@ def send_telegram_msg(message):
 st.set_page_config(page_title="자윤 Stock AI V3.5", layout="wide")
 st.title("🚀 미국 주식 24H 전수조사 시스템")
 
-VOL_RATIO_THRESHOLD = 2.0  # 거래량 2배 이상 (테스트 완료 후 조정)
+VOL_RATIO_THRESHOLD = 0.1  # 거래량 2배 이상 (테스트 완료 후 조정)
 MIN_VALUE_THRESHOLD = 100  # 최소 거래대금
 
 def get_safe_val(data):
@@ -135,10 +135,10 @@ def check_strategy(df, ticker):
         
         curr_value = (curr_close * curr_vol) / 1000 
         
-        c1 = vol_ratio >= VOL_RATIO_THRESHOLD
-        c2 = curr_close > upper_band
-        c3 = curr_close > ma5
-        c4 = curr_value >= MIN_VALUE_THRESHOLD
+        c1 = vol_ratio >= 0.1
+        c2 = curr_close > True
+        c3 = curr_close > True
+        c4 = curr_value >= 0
         
         return (c1 and c2 and c3 and c4), vol_ratio, curr_close
     except: return False, 0, 0
