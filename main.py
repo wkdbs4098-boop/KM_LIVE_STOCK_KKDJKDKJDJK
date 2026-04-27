@@ -156,7 +156,7 @@ def monitor_engine(state_obj):
             state_obj.progress_text = f"스캔 중: {progress_count} / {total_count} ({state_obj.progress_perc*100:.1f}%)"
 
             try:
-                df_all = yf.download(batch, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=15)
+                df_all = yf.download(batch, period="1d", interval="5m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=15)
                 for ticker in batch:
                     try:
                         df = df_all[ticker] if len(batch) > 1 else df_all
