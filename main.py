@@ -7,7 +7,7 @@ import requests
 import streamlit.components.v1 as components
 import os
 
-# --- [1] 블랙리스트 영구 저장소 ---
+# --- [1] 블랙리스트 영구 저장소 (동일) ---
 HARD_BLACKLIST = [
     "AACBR", "AACBU", "AACIW", "AACO", "AACOU", "AACPU", "ADAC", "ADACW", "AHL", "AIMDW",
     "AKO", "ALCY", "ALDF", "ALDFU", "ALDFW", "ALFUU", "ALIS", "ALISR", "ALOV", "ALOVU",
@@ -168,75 +168,56 @@ if app_mode == "백테스팅 (과거 성적 확인)":
 
 elif app_mode == "실시간 감시 (현재 시장 감시)":
     st.subheader("📡 현재 미국 시장 실시간 포착")
+    
+    # [수정] 24시간 가동 스위치 추가 (체크박스 상태가 서버에 저장됨)
+    run_auto = st.sidebar.checkbox("🚀 24시간 자동 감시 모드 가동", value=False)
+    
     if 'already_sent' not in st.session_state: st.session_state.already_sent = set()
     if 'black_list' not in st.session_state: st.session_state.black_list = load_blacklist()
 
     mon_status = st.empty()
     mon_results = st.container()
 
-    if st.button("📡 실시간 무한 감시 시작"):
-        batch_size = 20 # [최적화] 배치 크기를 조금 더 키워 통신 횟수 감소
+    # [수정] 버튼을 누르거나, 위 체크박스가 켜져 있으면 루프 실행
+    if st.button("📡 수동 감시 시작") or run_auto:
+        batch_size = 20 
         while True:
             scan_targets = [t for t in ALL_TICKERS if t not in st.session_state.black_list]
             total_count = len(scan_targets)
             current_time = datetime.now().strftime('%H:%M:%S')
 
-            # --- 터미널 시작 알림 ---
             print(f"\n{'='*40}")
             print(f"▶ 스캔 시작: {current_time} (대상: {total_count}개)")
             print(f"{'='*40}")
 
             for i in range(0, total_count, batch_size):
                 batch_tickers = scan_targets[i:i+batch_size]
-                
-                # 웹 UI 업데이트
                 mon_status.warning(f"⏱️ 스캔 중: {i + len(batch_tickers)} / {total_count} (블랙리스트: {len(st.session_state.black_list)}개)")
-                
-                # [개선] 터미널 진행 상황 즉시 출력 (flush=True 추가)
                 progress_percent = ((i + len(batch_tickers)) / total_count) * 100
-                print(f"[{current_time}] 진행: {progress_percent:4.1f}% | {batch_tickers[0]}... 진행 중", flush=True)
+                print(f"[{current_time}] 진행: {progress_percent:4.1f}% | {batch_tickers[0]}...", flush=True)
                 
                 try:
-                    # [최적화] threads=True로 변경하여 병렬 다운로드 활성화 (속도 대폭 향상)
-                    df_all = yf.download(
-                        batch_tickers, 
-                        period="2d", 
-                        interval="1m", 
-                        progress=False, 
-                        group_by='ticker', 
-                        prepost=True, 
-                        threads=True,  # 속도의 핵심
-                        timeout=15     # 응답 없는 종목 무시
-                    )
-                    
+                    df_all = yf.download(batch_tickers, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=15)
                     for ticker in batch_tickers:
-                        # 데이터 구조 처리
                         df_live = df_all[ticker] if len(batch_tickers) > 1 else df_all
-                        
-                        # 데이터 유무 체크
                         if df_live.empty or df_live['Close'].dropna().empty:
                             if ticker not in st.session_state.black_list:
-                                print(f"  └ ❌ {ticker}: 데이터 없음 (블랙리스트 추가)", flush=True)
                                 st.session_state.black_list.add(ticker)
                                 save_blacklist(st.session_state.black_list)
                             continue 
-                        
-                        # 전략 체크
                         if len(df_live) < 21: continue
                         is_hit, v_ratio, _ = check_strategy(df_live, ticker)
-                        
                         if is_hit and ticker not in st.session_state.already_sent:
                             with mon_results:
                                 st.success(f"🎯 **{ticker}** 포착! | {v_ratio:.1f}배 | {current_time}")
                             play_sound()
                             send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n시간: {current_time}")
                             st.session_state.already_sent.add(ticker)
-                            print(f"  └ 🔥 {ticker} 포착 완료!", flush=True)
-
                 except Exception as e:
-                    print(f"  └ ⚠️ 에러 발생 ({batch_tickers[0]} 등): {e}", flush=True)
+                    print(f"  └ ⚠️ 에러 발생: {e}", flush=True)
                     time.sleep(5)
                     continue
             
-            print(f"\n✅ 한 사이클 완료! 60초 대기 후 재시작...", flush=True)
+            print(f"\n✅ 사이클 완료! 60초 대기...", flush=True)
             time.sleep(60)
+            # 스트림릿 클라우드에서 세션을 유지하기 위해 루프 끝에 rerun은 하지 않음 (while문으로 충분)
