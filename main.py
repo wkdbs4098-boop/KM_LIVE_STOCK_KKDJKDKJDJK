@@ -158,11 +158,24 @@ def monitor_engine(state_obj):
             try:
                 df_all = yf.download(batch, period="7d", interval="5m", progress=False, group_by='ticker', prepost=True, threads=False, timeout=15)
                 for ticker in batch:
+                    for ticker in batch:
                     try:
-                        df = df_all[ticker] if len(batch) > 1 else df_all
-                        if df is None or df.empty or ticker in already_sent_today: continue
+                        # --- [여기부터 교체 시작!] ---
+                        # 1. 멀티 티커 데이터에서 해당 종목만 안전하게 추출 (xs 사용)
+                        if len(batch) > 1:
+                            if ticker not in df_all.columns.get_level_values(0): continue
+                            df = df_all.xs(ticker, axis=1, level=0) # level=0으로 수정
+                        else:
+                            df = df_all
                         
-                        is_hit, v_ratio, price = check_strategy(df, ticker)
+                        # 2. 데이터가 없거나 nan만 가득한 경우 스킵
+                        if df is None or df.empty: continue
+                        
+                        # 3. 'Close', 'Volume' 컬럼에 nan이 있으면 그 행은 지우고 계산
+                        df = df.dropna(subset=['Close', 'Volume'])
+                        
+                        # 4. 지표 계산에 필요한 최소 데이터(7일 5분봉은 넉넉해야 함) 확인
+                        if len(df) < 30: continue
                         if is_hit:
                             print(f"🔥 [포착] {ticker} | {v_ratio:.1f}배", flush=True)
                             send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n가격: ${price:.2f}\n시간: {datetime.now().strftime('%H:%M:%S')}")
