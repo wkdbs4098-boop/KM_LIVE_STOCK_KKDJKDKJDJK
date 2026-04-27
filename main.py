@@ -4,10 +4,10 @@ import pandas as pd
 import time
 from datetime import datetime
 import requests
-import streamlit.components.v1 as components
 import os
+import threading
 
-# --- [1] 블랙리스트 영구 저장소 (동일) ---
+# --- [1] 블랙리스트 (자윤님의 기존 데이터 100% 유지) ---
 HARD_BLACKLIST = [
     "AACBR", "AACBU", "AACIW", "AACO", "AACOU", "AACPU", "ADAC", "ADACW", "AHL", "AIMDW",
     "AKO", "ALCY", "ALDF", "ALDFU", "ALDFW", "ALFUU", "ALIS", "ALISR", "ALOV", "ALOVU",
@@ -39,185 +39,95 @@ HARD_BLACKLIST = [
     "XSLLU", "Y", "ZKP", "ZOOZW"
 ]
 
-# --- [2] 블랙리스트 관리 함수 ---
-def load_blacklist():
-    blacklist = set(HARD_BLACKLIST)
-    if os.path.exists("blacklist.txt"):
-        with open("blacklist.txt", "r") as f:
-            blacklist.update(line.strip() for line in f if line.strip())
-    return blacklist
-
-def save_blacklist(blacklist_set):
-    with open("blacklist.txt", "w") as f:
-        for ticker in sorted(list(blacklist_set)):
-            f.write(f"{ticker}\n")
-
-# --- 텔레그램 설정 ---
+# --- [2] 텔레그램 보안 설정 ---
 try:
     TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
     TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 except:
-    TELEGRAM_TOKEN = "" 
-    TELEGRAM_CHAT_ID = ""
+    st.error("Secrets 설정(TOKEN, CHAT_ID)이 누락되었습니다!")
+    st.stop()
 
 def send_telegram_msg(message):
-    if not TELEGRAM_TOKEN: return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         params = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         requests.get(url, params=params, timeout=5)
-    except:
-        pass
-
-def play_sound():
-    sound_html = """<audio autoplay><source src="https://raw.githubusercontent.com/carsonology/free-sound-effects/master/notifications/success.mp3" type="audio/mp3"></audio>"""
-    components.html(sound_html, height=0)
-
-# --- 1. 설정 및 UI ---
-st.set_page_config(page_title="자윤 Stock AI V3.5", layout="wide")
-st.title("🚀 미국 전수조사: 백테스팅 & 실시간 감시 통합형")
-
-VOL_RATIO_THRESHOLD = 3
-TAKE_PROFIT = 0.1
-STOP_LOSS = 0.05
-MIN_VALUE_THRESHOLD = 1000000 
-
-@st.cache_data(ttl=86400)
-def get_all_market_tickers():
-    try:
-        url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
-        tickers = pd.read_csv(url, header=None)[0].tolist()
-        return sorted(list(set([str(t).strip().upper() for t in tickers if str(t).isalpha()])))
-    except:
-        return ["AAPL", "TSLA", "NVDA", "AMD", "MSFT"]
-
-ALL_TICKERS = get_all_market_tickers()
+    except: pass
 
 def get_safe_val(data):
     if isinstance(data, (pd.Series, pd.DataFrame)):
         val = data.iloc[-1]
-        if isinstance(val, (pd.Series, pd.DataFrame)):
-            return float(val.iloc[0])
-        return float(val)
+        return float(val.iloc[0]) if isinstance(val, (pd.Series, pd.DataFrame)) else float(val)
     return float(data)
 
-def check_strategy(df, ticker):
-    if df is None or len(df) < 21: return False, 0, 0
+# --- [3] 자윤님 원본 전략 조건 (100% 복구) ---
+def check_strategy(df):
+    if df is None or len(df) < 21: return False, 0
     try:
         curr_close = get_safe_val(df['Close'])
         curr_vol = get_safe_val(df['Volume'])
         vol_avg = df['Volume'].iloc[-6:-1].mean()
         if isinstance(vol_avg, pd.Series): vol_avg = vol_avg.iloc[0]
-        if vol_avg == 0: return False, 0, 0
+        if vol_avg == 0: return False, 0
+        
         vol_ratio = curr_vol / vol_avg
         curr_value = curr_close * curr_vol
+        
+        # 보조지표
         ma5 = get_safe_val(df['Close'].rolling(window=5).mean())
         ma20 = get_safe_val(df['Close'].rolling(window=20).mean())
         std20 = get_safe_val(df['Close'].rolling(window=20).std())
         upper_band = ma20 + (std20 * 2)
-        c1 = vol_ratio >= VOL_RATIO_THRESHOLD
-        c2 = curr_close > upper_band
-        c3 = curr_close > ma5
-        c4 = curr_value >= MIN_VALUE_THRESHOLD
-        return (c1 and c2 and c3 and c4), vol_ratio, curr_value
-    except: return False, 0, 0
+        
+        # 필터링
+        c1 = vol_ratio >= 3             # 거래량 폭발
+        c2 = curr_close > upper_band    # 볼밴 상단 돌파
+        c3 = curr_close > ma5           # 5일선 위
+        c4 = curr_value >= 1000000      # 100만불 이상
+        
+        if c1 and c2 and c3 and c4:
+            return True, vol_ratio
+        return False, 0
+    except: return False, 0
 
-st.sidebar.header("🕹️ 모드 전환")
-app_mode = st.sidebar.selectbox("실행할 모드를 선택하세요", ["백테스팅 (과거 성적 확인)", "실시간 감시 (현재 시장 감시)"])
+# --- [4] 백그라운드 무한 엔진 ---
+def monitor_engine():
+    already_sent = set()
+    try:
+        url = "https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/main/all/all_tickers.txt"
+        all_tickers = pd.read_csv(url, header=None)[0].tolist()
+        all_tickers = sorted(list(set([str(t).strip().upper() for t in all_tickers if str(t).isalpha()])))
+    except: all_tickers = ["AAPL", "TSLA", "NVDA"]
 
-if app_mode == "백테스팅 (과거 성적 확인)":
-    st.subheader("📊 2026년 1월 1일 ~ 현재 전수조사 리포트")
-    col1, col2, col3 = st.columns(3)
-    stat_total = col1.metric("총 포착", "0")
-    stat_wins = col2.metric("익절 ✅", "0")
-    stat_losses = col3.metric("손절 ❌", "0")
-    live_status = st.empty()
-    result_area = st.empty() 
+    send_telegram_msg("🚀 [알림] 자윤님 전략 24H 감시 엔진이 정상적으로 시작되었습니다.")
     
-    if st.button("🚀 전수조사 및 결과 추적 시작"):
-        wins, losses, hit_data = 0, 0, []
-        for i, ticker in enumerate(ALL_TICKERS):
-            live_status.info(f"🔍 분석 중: {ticker} ({i+1}/{len(ALL_TICKERS)})")
+    while True:
+        scan_targets = [t for t in all_tickers if t not in HARD_BLACKLIST]
+        batch_size = 20
+        for i in range(0, len(scan_targets), batch_size):
+            batch = scan_targets[i:i+batch_size]
             try:
-                df = yf.download(ticker, start="2025-12-01", progress=False, auto_adjust=False)
-                if df.empty or len(df) < 21: continue
-                target_date = pd.Timestamp('2026-01-01').tz_localize(df.index.tz)
-                start_idx = 0
-                for idx, date in enumerate(df.index):
-                    if date >= target_date:
-                        start_idx = idx
-                        break
-                for j in range(max(20, start_idx), len(df)):
-                    sub_df = df.iloc[:j+1]
-                    is_hit, v_ratio, _ = check_strategy(sub_df, ticker)
+                df_all = yf.download(batch, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=15)
+                for ticker in batch:
+                    df = df_all[ticker] if len(batch) > 1 else df_all
+                    if df.empty or ticker in already_sent: continue
+                    is_hit, v_ratio = check_strategy(df)
                     if is_hit:
-                        entry_p = get_safe_val(df['Close'].iloc[[j]])
-                        target_p, stop_p = entry_p * (1+TAKE_PROFIT), entry_p * (1-STOP_LOSS)
-                        res = "진행중"
-                        for k in range(j+1, len(df)):
-                            high_p, low_p = get_safe_val(df['High'].iloc[[k]]), get_safe_val(df['Low'].iloc[[k]])
-                            if high_p >= target_p: wins += 1; res = "✅익절"; break
-                            elif low_p <= stop_p: losses += 1; res = "❌손절"; break
-                        hit_data.append({"포착일": df.index[j].strftime('%Y-%m-%d'), "티커": ticker, "거래량": f"{v_ratio:.1f}배", "매수가": f"${entry_p:.2f}", "결과": res})
-                        result_area.dataframe(pd.DataFrame(hit_data), use_container_width=True, height=500)
-                        stat_total.metric("총 포착", len(hit_data))
-                        stat_wins.metric("익절 ✅", wins)
-                        stat_losses.metric("손절 ❌", losses)
+                        send_telegram_msg(f"🎯 **{ticker}** 포착!\n거래량: {v_ratio:.1f}배\n상태: 24H 실시간 감시 중")
+                        already_sent.add(ticker)
+                time.sleep(1.2) # API 차단 방지용
             except: continue
-        st.success("🏁 조사가 완료되었습니다!")
+        # 한 사이클 완료 후 60초 대기
+        time.sleep(60)
 
-elif app_mode == "실시간 감시 (현재 시장 감시)":
-    st.subheader("📡 현재 미국 시장 실시간 포착")
-    
-    # [수정] 24시간 가동 스위치 추가 (체크박스 상태가 서버에 저장됨)
-    run_auto = st.sidebar.checkbox("🚀 24시간 자동 감시 모드 가동", value=False)
-    
-    if 'already_sent' not in st.session_state: st.session_state.already_sent = set()
-    if 'black_list' not in st.session_state: st.session_state.black_list = load_blacklist()
+# --- [5] 메인 실행부 ---
+if "engine_run" not in st.session_state:
+    if not any(t.name == "StockEngine" for t in threading.enumerate()):
+        threading.Thread(target=monitor_engine, name="StockEngine", daemon=True).start()
+    st.session_state.engine_run = True
 
-    mon_status = st.empty()
-    mon_results = st.container()
-
-    # [수정] 버튼을 누르거나, 위 체크박스가 켜져 있으면 루프 실행
-    if st.button("📡 수동 감시 시작") or run_auto:
-        batch_size = 20 
-        while True:
-            scan_targets = [t for t in ALL_TICKERS if t not in st.session_state.black_list]
-            total_count = len(scan_targets)
-            current_time = datetime.now().strftime('%H:%M:%S')
-
-            print(f"\n{'='*40}")
-            print(f"▶ 스캔 시작: {current_time} (대상: {total_count}개)")
-            print(f"{'='*40}")
-
-            for i in range(0, total_count, batch_size):
-                batch_tickers = scan_targets[i:i+batch_size]
-                mon_status.warning(f"⏱️ 스캔 중: {i + len(batch_tickers)} / {total_count} (블랙리스트: {len(st.session_state.black_list)}개)")
-                progress_percent = ((i + len(batch_tickers)) / total_count) * 100
-                print(f"[{current_time}] 진행: {progress_percent:4.1f}% | {batch_tickers[0]}...", flush=True)
-                
-                try:
-                    df_all = yf.download(batch_tickers, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=15)
-                    for ticker in batch_tickers:
-                        df_live = df_all[ticker] if len(batch_tickers) > 1 else df_all
-                        if df_live.empty or df_live['Close'].dropna().empty:
-                            if ticker not in st.session_state.black_list:
-                                st.session_state.black_list.add(ticker)
-                                save_blacklist(st.session_state.black_list)
-                            continue 
-                        if len(df_live) < 21: continue
-                        is_hit, v_ratio, _ = check_strategy(df_live, ticker)
-                        if is_hit and ticker not in st.session_state.already_sent:
-                            with mon_results:
-                                st.success(f"🎯 **{ticker}** 포착! | {v_ratio:.1f}배 | {current_time}")
-                            play_sound()
-                            send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n시간: {current_time}")
-                            st.session_state.already_sent.add(ticker)
-                except Exception as e:
-                    print(f"  └ ⚠️ 에러 발생: {e}", flush=True)
-                    time.sleep(5)
-                    continue
-            
-            print(f"\n✅ 사이클 완료! 60초 대기...", flush=True)
-            time.sleep(60)
-            # 스트림릿 클라우드에서 세션을 유지하기 위해 루프 끝에 rerun은 하지 않음 (while문으로 충분)
+st.set_page_config(page_title="자윤 Stock AI 24H", layout="wide")
+st.title("📡 자윤 24시간 실시간 감시 시스템")
+st.success("✅ 자윤님의 4대 전략 조건이 백그라운드에서 무한 가동 중입니다.")
+st.write(f"서버 현재 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.info("이제 이 페이지를 닫으셔도 서버는 멈추지 않고 텔레그램을 보냅니다.")
