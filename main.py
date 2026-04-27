@@ -103,8 +103,8 @@ def play_sound():
 st.set_page_config(page_title="자윤 Stock AI V3.5", layout="wide")
 st.title("🚀 미국 전수조사: 백테스팅 & 실시간 감시 통합형")
 
-VOL_RATIO_THRESHOLD = 3
-MIN_VALUE_THRESHOLD = 1000000 
+VOL_RATIO_THRESHOLD = 0.1
+MIN_VALUE_THRESHOLD = 100 
 
 @st.cache_data(ttl=86400)
 def get_all_market_tickers():
