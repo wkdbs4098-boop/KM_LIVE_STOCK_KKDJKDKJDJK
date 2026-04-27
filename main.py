@@ -158,7 +158,7 @@ def monitor_engine(state_obj):
     while True:
         scan_targets = [t for t in tickers if t not in blacklist]
         total_count = len(scan_targets)
-        batch_size = 20 
+        batch_size = 10 
 
         for i in range(0, total_count, batch_size):
             batch = scan_targets[i:i+batch_size]
@@ -169,7 +169,7 @@ def monitor_engine(state_obj):
             state_obj.progress_text = f"스캔 중: {progress_count} / {total_count} ({state_obj.progress_perc*100:.1f}%)"
 
             try:
-                df_all = yf.download(batch, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=15)
+                df_all = yf.download(batch, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=20)
                 for ticker in batch:
                     df = df_all[ticker] if len(batch) > 1 else df_all
                     if df.empty or ticker in already_sent_today: continue
@@ -181,11 +181,11 @@ def monitor_engine(state_obj):
                         send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n가격: ${price:.2f}\n시간: {datetime.now().strftime('%H:%M:%S')}")
                         state_obj.add_hit(ticker, v_ratio, price) # UI 및 파일 자동 저장
                         already_sent_today.add(ticker)
-                time.sleep(0.5) 
+                time.sleep(2) 
             except: continue
         
         state_obj.progress_text = f"✅ {datetime.now().strftime('%H:%M:%S')} 한 사이클 완료. 60초 대기 중..."
-        time.sleep(60)
+        time.sleep(120)
 
 # --- [자동 시작 로직] ---
 if "engine_run" not in st.session_state:
