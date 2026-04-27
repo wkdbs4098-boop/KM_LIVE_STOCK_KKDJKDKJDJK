@@ -5,15 +5,59 @@ import time
 from datetime import datetime
 import requests
 import streamlit.components.v1 as components
+import os
 
+# --- [1] 블랙리스트 영구 저장소 (가장 상단에 위치) ---
+HARD_BLACKLIST = [
+    "AACBR", "AACBU", "AACIW", "AACO", "AACOU", "AACPU", "ADAC", "ADACW", "AHL", "AIMDW",
+    "AKO", "ALCY", "ALDF", "ALDFU", "ALDFW", "ALFUU", "ALIS", "ALISR", "ALOV", "ALOVU",
+    "ALOVW", "ANG", "ANSCW", "APAC", "APACR", "APLMW", "ARCIU", "ARTC", "ATH", "AXINR",
+    "BACCR", "BANFP", "BAYAR", "BCGWW", "BDMDW", "BEBE", "BF", "BHAVR", "BHAVU", "BLRK",
+    "BLRKU", "BLRKW", "BLUWW", "BML", "BNCWZ", "BPAC", "BRID", "BRK", "BRKRP", "BSAA",
+    "BTBDW", "BZFDW", "CAPN", "CAQUU", "CCGWW", "CCIIW", "CDR", "CDTTW", "CFTR", "CHECU",
+    "CHPG", "CHPGR", "COLAU", "CRACW", "CRANU", "CRAQR", "CRAQU", "CRD", "CSHRW", "CTAAU",
+    "CUBWU", "DAAQU", "DAAQW", "DAICW", "DFSCW", "DNMXU", "DSACU", "DTSQR", "DTSQU", "DYORU",
+    "EMIS", "ERNAW", "ETHMU", "ETI", "EVOX", "EVOXW", "EXOZ", "FACTU", "FGIIU", "FMSTW",
+    "FRMEP", "FSHP", "GECCO", "GIGGU", "GIPRW", "GIWWR", "GIX", "GJP", "GJR", "GJT",
+    "GLOP", "GPAC", "GPACU", "GPATU", "GSHR", "GTENW", "GTERR", "GTERU", "HAVAU", "HCACU",
+    "HCICU", "HCMAU", "HLXC", "HSCSW", "HVIIU", "I", "IACOU", "ICR", "ICUCW", "IEAG",
+    "IGACR", "IGACU", "IINNW", "ILLU", "INAC", "INACR", "IPCXU", "IPEX", "IPEXU", "IPODU",
+    "IRHOU", "ITHAU", "IVDAW", "K", "KOYNW", "KTTAW", "KTWOU", "KVAC", "KWMWW", "LAFA",
+    "LATAU", "LCCCU", "LKSPR", "LKSPU", "LOTWW", "LPCVU", "LUCYW", "MACI", "MBVIU", "MCGAW",
+    "MDAIW", "MDCXW", "MESH", "MESHU", "MEVO", "MEVOW", "MKDWW", "MKLY", "MKLYU", "MLACU",
+    "MOBBW", "MRNOW", "MUZEU", "MUZEW", "N", "NBRGU", "NEXRW", "NOEM", "NOEMR", "NOEMW",
+    "NOVTU", "NPACU", "NTWO", "OABIW", "OACC", "OACCU", "OAK", "OBAWU", "OFSSH", "OFSSO",
+    "OIMAU", "OIMAW", "OTGAU", "OTGAW", "OYSER", "PAAC", "PAACW", "PACH", "PALOU", "PALOW",
+    "PCAPW", "PCTTU", "PHXE", "PLUT", "PONOU", "PRHIZ", "PRIF", "PYT", "QETA", "QSEAU",
+    "RAAQU", "RANG", "RCKTW", "RDACU", "RDIB", "RDZNW", "REVBW", "RFAI", "RNGTU", "RNGTW",
+    "RVSNW", "SAAQU", "SCAGW", "SCE", "SCIIR", "SCIIU", "SCPQ", "SCPQW", "SDHIU", "SEAL",
+    "SEATW", "SIMAW", "SORN", "SPEG", "SPEGU", "SPKLW", "SSACR", "SSEA", "SUMAU", "SVAQ",
+    "SVAQU", "SVCC", "SVIVU", "SWKHL", "SXTPW", "SZZLU", "TACH", "TACHW", "TALKW", "TAVI",
+    "TBLAW", "TC", "TDWDR", "TLNCU", "TLSIW", "TMTSU", "TRGSR", "TRGSU", "TRSG", "TRTN",
+    "TVACU", "TVAI", "UAC", "UYSC", "VEEAW", "VHCP", "VHCPU", "VNMEU", "VSEEW", "WALDW",
+    "WENNW", "WFCF", "WLDSW", "WLII", "WLIIU", "WSTNR", "X", "XBPEW", "XCBE", "XRPNU",
+    "XSLLU", "Y", "ZKP", "ZOOZW"
+]
 # --- 텔레그램 설정 (수정본: 내 PC & 클라우드 공용) ---
+# --- [2] 블랙리스트 관리 함수 ---
+def load_blacklist():
+    blacklist = set(HARD_BLACKLIST)
+    if os.path.exists("blacklist.txt"):
+        with open("blacklist.txt", "r") as f:
+            blacklist.update(line.strip() for line in f if line.strip())
+    return blacklist
+
+def save_blacklist(blacklist_set):
+    with open("blacklist.txt", "w") as f:
+        for ticker in sorted(list(blacklist_set)):
+
+
+# --- 텔레그램 설정 ---
 try:
     # 1. 클라우드(Streamlit Cloud) 보안 설정 확인
     TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
     TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 except Exception:
-    # 2. 내 PC에서 실행할 때 (에러 방지용 직접 입력)
-    # 아래 따옴표 안에 자윤님의 실제 토큰과 ID를 적어주세요.
     TELEGRAM_TOKEN = "" 
     TELEGRAM_CHAT_ID = ""
 
@@ -160,63 +204,74 @@ if app_mode == "백테스팅 (과거 성적 확인)":
 
 elif app_mode == "실시간 감시 (현재 시장 감시)":
     st.subheader("📡 현재 미국 시장 실시간 포착")
-    
-    if 'already_sent' not in st.session_state:
-        st.session_state.already_sent = set()
+    if 'already_sent' not in st.session_state: st.session_state.already_sent = set()
+    if 'black_list' not in st.session_state: st.session_state.black_list = load_blacklist()
 
     mon_status = st.empty()
     mon_results = st.container()
 
     if st.button("📡 실시간 무한 감시 시작"):
-        batch_size = 20 
-        # 1. 프로그램 실행 중 상폐 종목을 기억할 쓰레기통 생성
-        if 'black_list' not in st.session_state:
-            st.session_state.black_list = set()
-        
+        batch_size = 30 # [최적화] 배치 크기를 조금 더 키워 통신 횟수 감소
         while True:
-            # 2. 전체 종목에서 블랙리스트(상폐)는 제외하고 스캔 시작
             scan_targets = [t for t in ALL_TICKERS if t not in st.session_state.black_list]
             total_count = len(scan_targets)
             current_time = datetime.now().strftime('%H:%M:%S')
-            mon_status.warning(f"⏱️ {total_count}개 종목 스캔 중... (제외된 상폐 종목: {len(st.session_state.black_list)}개)")
-            
+
+            # --- 터미널 시작 알림 ---
+            print(f"\n{'='*40}")
+            print(f"▶ 스캔 시작: {current_time} (대상: {total_count}개)")
+            print(f"{'='*40}")
+
             for i in range(0, total_count, batch_size):
                 batch_tickers = scan_targets[i:i+batch_size]
+                
+                # 웹 UI 업데이트
+                mon_status.warning(f"⏱️ 스캔 중: {i + len(batch_tickers)} / {total_count} (블랙리스트: {len(st.session_state.black_list)}개)")
+                
+                # [개선] 터미널 진행 상황 즉시 출력 (flush=True 추가)
+                progress_percent = ((i + len(batch_tickers)) / total_count) * 100
+                print(f"[{current_time}] 진행: {progress_percent:4.1f}% | {batch_tickers[0]}... 진행 중", flush=True)
+                
                 try:
-                    df_all = yf.download(batch_tickers, period="1d", interval="1m", progress=False, group_by='ticker', prepost=True)
+                    # [최적화] threads=True로 변경하여 병렬 다운로드 활성화 (속도 대폭 향상)
+                    df_all = yf.download(
+                        batch_tickers, 
+                        period="2d", 
+                        interval="1m", 
+                        progress=False, 
+                        group_by='ticker', 
+                        prepost=True, 
+                        threads=True,  # 속도의 핵심
+                        timeout=10     # 응답 없는 종목 무시
+                    )
                     
                     for ticker in batch_tickers:
-                        # 데이터 추출
+                        # 데이터 구조 처리
                         df_live = df_all[ticker] if len(batch_tickers) > 1 else df_all
                         
-                        # --- [핵심] 상폐/유령 종목 자동 판별 및 블랙리스트 등록 ---
-                        if df_live.empty or df_live['Close'].isnull().all():
-                            print(f"❌ {ticker}: 데이터 없음 -> 블랙리스트 등록 (다음 바퀴부터 제외)")
-                            st.session_state.black_list.add(ticker)
+                        # 데이터 유무 체크
+                        if df_live.empty or df_live['Close'].dropna().empty:
+                            if ticker not in st.session_state.black_list:
+                                print(f"  └ ❌ {ticker}: 데이터 없음 (블랙리스트 추가)", flush=True)
+                                st.session_state.black_list.add(ticker)
+                                save_blacklist(st.session_state.black_list)
                             continue 
                         
-                        if len(df_live) < 21: 
-                            continue
-                        
-                        # 전략 검사 및 알림
+                        # 전략 체크
+                        if len(df_live) < 21: continue
                         is_hit, v_ratio, _ = check_strategy(df_live, ticker)
+                        
                         if is_hit and ticker not in st.session_state.already_sent:
                             with mon_results:
                                 st.success(f"🎯 **{ticker}** 포착! | {v_ratio:.1f}배 | {current_time}")
-                                st.toast(f"{ticker} 포착!", icon="🔥")
-                            
                             play_sound()
-                            msg = f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n시간: {current_time}"
-                            send_telegram_msg(msg)
+                            send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n시간: {current_time}")
                             st.session_state.already_sent.add(ticker)
-                    
-                    # 20개마다 서버 휴식
-                    time.sleep(1.5) 
+                            print(f"  └ 🔥 {ticker} 포착 완료!", flush=True)
 
                 except Exception as e:
-                    print(f"🚨 에러 발생: {e}")
-                    time.sleep(2)
+                    print(f"  └ ⚠️ 에러 발생 ({batch_tickers[0]} 등): {e}", flush=True)
                     continue
             
-            # 한 바퀴 완료 후 1분 휴식
+            print(f"\n✅ 한 사이클 완료! 60초 대기 후 재시작...", flush=True)
             time.sleep(60)
