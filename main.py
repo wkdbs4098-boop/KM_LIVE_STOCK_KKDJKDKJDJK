@@ -7,6 +7,8 @@ import requests
 import os
 import threading
 
+print("🔥 서버 엔진 가동 테스트 시작!", flush=True)
+
 # --- [1] 블랙리스트 (자윤님의 기존 데이터 100% 유지) ---
 HARD_BLACKLIST = [
     "AACBR", "AACBU", "AACIW", "AACO", "AACOU", "AACPU", "ADAC", "ADACW", "AHL", "AIMDW",
