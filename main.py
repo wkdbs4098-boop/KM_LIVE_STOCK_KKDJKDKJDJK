@@ -8,8 +8,7 @@ import streamlit.components.v1 as components
 import os
 import threading
 
-# --- [0] 공유 저장소 및 자동 저장 설정 (추가) ---
-# 백그라운드 스레드와 UI 간의 데이터 전달을 위한 클래스
+# --- [0] 공유 저장소 및 자동 저장 설정 ---
 class GlobalState:
     def __init__(self):
         self.progress_text = "준비 중..."
@@ -35,7 +34,7 @@ class GlobalState:
 if "gs" not in st.session_state:
     st.session_state.gs = GlobalState()
 
-# --- [1] 블랙리스트 영구 저장소 (원본 유지) ---
+# --- [1] 블랙리스트 영구 저장소 ---
 HARD_BLACKLIST = [
     "AACBR", "AACBU", "AACIW", "AACO", "AACOU", "AACPU", "ADAC", "ADACW", "AHL", "AIMDW",
     "AKO", "ALCY", "ALDF", "ALDFU", "ALDFW", "ALFUU", "ALIS", "ALISR", "ALOV", "ALOVU",
@@ -67,7 +66,7 @@ HARD_BLACKLIST = [
     "XSLLU", "Y", "ZKP", "ZOOZW"
 ]
 
-# --- [2] 블랙리스트 관리 함수 (원본 유지) ---
+# --- [2] 블랙리스트 관리 함수 ---
 def load_blacklist():
     blacklist = set(HARD_BLACKLIST)
     if os.path.exists("blacklist.txt"):
@@ -75,12 +74,7 @@ def load_blacklist():
             blacklist.update(line.strip() for line in f if line.strip())
     return blacklist
 
-def save_blacklist(blacklist_set):
-    with open("blacklist.txt", "w") as f:
-        for ticker in sorted(list(blacklist_set)):
-            f.write(f"{ticker}\n")
-
-# --- 텔레그램 설정 (원본 유지) ---
+# --- 텔레그램 설정 ---
 try:
     TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
     TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
@@ -95,16 +89,12 @@ def send_telegram_msg(message):
         requests.get(url, params=params, timeout=5)
     except: pass
 
-def play_sound():
-    sound_html = """<audio autoplay><source src="https://raw.githubusercontent.com/carsonology/free-sound-effects/master/notifications/success.mp3" type="audio/mp3"></audio>"""
-    components.html(sound_html, height=0)
-
-# --- 설정 및 UI (원본 유지) ---
+# --- 설정 및 데이터 호출 ---
 st.set_page_config(page_title="자윤 Stock AI V3.5", layout="wide")
-st.title("🚀 미국 전수조사: 백테스팅 & 실시간 감시 통합형")
+st.title("🚀 미국 주식 24H 전수조사 시스템")
 
-VOL_RATIO_THRESHOLD = 0.1
-MIN_VALUE_THRESHOLD = 100 
+VOL_RATIO_THRESHOLD = 1.5
+MIN_VALUE_THRESHOLD = 100000 
 
 @st.cache_data(ttl=86400)
 def get_all_market_tickers():
@@ -139,6 +129,7 @@ def check_strategy(df, ticker):
         ma20 = get_safe_val(df['Close'].rolling(window=20).mean())
         std20 = get_safe_val(df['Close'].rolling(window=20).std())
         upper_band = ma20 + (std20 * 2)
+        
         c1 = vol_ratio >= VOL_RATIO_THRESHOLD
         c2 = curr_close > upper_band
         c3 = curr_close > ma5
@@ -146,90 +137,71 @@ def check_strategy(df, ticker):
         return (c1 and c2 and c3 and c4), vol_ratio, curr_close
     except: return False, 0, 0
 
-# --- [수정] 24시간 무한 감시 백그라운드 엔진 (UI 연동 및 터미널 로그 최소화) ---
+# --- 감시 엔진 ---
 def monitor_engine(state_obj):
     already_sent_today = set()
     blacklist = load_blacklist()
     tickers = ALL_TICKERS
-    
-    # 터미널 시작 로그만 남김
-    print(f"🚀 [엔진] 24H 감시 시작 (대상: {len(tickers)}개)", flush=True)
+    print(f"🚀 [엔진] 감시 시작 (대상: {len(tickers)}개)", flush=True)
     
     while True:
         scan_targets = [t for t in tickers if t not in blacklist]
         total_count = len(scan_targets)
-        batch_size = 10 
+        batch_size = 20 
 
         for i in range(0, total_count, batch_size):
             batch = scan_targets[i:i+batch_size]
-            
-            # [수정] 터미널 진행로그 삭제 -> UI용 데이터 갱신
             progress_count = min(i + batch_size, total_count)
             state_obj.progress_perc = progress_count / total_count
             state_obj.progress_text = f"스캔 중: {progress_count} / {total_count} ({state_obj.progress_perc*100:.1f}%)"
 
             try:
-                df_all = yf.download(batch, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=20)
+                df_all = yf.download(batch, period="2d", interval="1m", progress=False, group_by='ticker', prepost=True, threads=True, timeout=15)
                 for ticker in batch:
-                    df = df_all[ticker] if len(batch) > 1 else df_all
-                    if df.empty or ticker in already_sent_today: continue
-                    
-                    is_hit, v_ratio, price = check_strategy(df, ticker)
-                    if is_hit:
-                        # [수정] 터미널에는 포착 로그만 출력
-                        print(f"🔥 [포착] {ticker} | 거래량: {v_ratio:.1f}배", flush=True)
-                        send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n가격: ${price:.2f}\n시간: {datetime.now().strftime('%H:%M:%S')}")
-                        state_obj.add_hit(ticker, v_ratio, price) # UI 및 파일 자동 저장
-                        already_sent_today.add(ticker)
-                time.sleep(2) 
-            except: continue
+                    try:
+                        df = df_all[ticker] if len(batch) > 1 else df_all
+                        if df is None or df.empty or ticker in already_sent_today: continue
+                        
+                        is_hit, v_ratio, price = check_strategy(df, ticker)
+                        if is_hit:
+                            print(f"🔥 [포착] {ticker} | {v_ratio:.1f}배", flush=True)
+                            send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n가격: ${price:.2f}\n시간: {datetime.now().strftime('%H:%M:%S')}")
+                            state_obj.add_hit(ticker, v_ratio, price)
+                            already_sent_today.add(ticker)
+                    except: continue
+                time.sleep(2) # 배치 간 안전 휴식
+            except Exception as e:
+                if "Rate limited" in str(e):
+                    time.sleep(600) # 차단 시 10분 휴식
+                continue
         
-        state_obj.progress_text = f"✅ {datetime.now().strftime('%H:%M:%S')} 한 사이클 완료. 60초 대기 중..."
-        time.sleep(120)
+        state_obj.progress_text = f"✅ {datetime.now().strftime('%H:%M:%S')} 완주! 90초 후 재시작"
+        time.sleep(90)
 
-# --- [자동 시작 로직] ---
+# --- 실행 로직 ---
 if "engine_run" not in st.session_state:
     if not any(t.name == "StockEngine" for t in threading.enumerate()):
-        # 스레드 생성 시 state_obj 전달
         threading.Thread(target=monitor_engine, args=(st.session_state.gs,), name="StockEngine", daemon=True).start()
     st.session_state.engine_run = True
 
-# --- 메인 UI 로직 ---
-st.sidebar.header("🕹️ 모드 전환")
-app_mode = st.sidebar.selectbox("실행할 모드를 선택하세요", ["백테스팅 (과거 성적 확인)", "실시간 감시 (현재 시장 감시)"])
+# --- 메인 UI ---
+st.success("실시간 감시 엔진이 백그라운드에서 가동 중입니다.")
 
-if app_mode == "백테스팅 (과거 성적 확인)":
-    # (원본 로직 유지)
-    st.subheader("📊 2026년 1월 1일 ~ 현재 전수조사 리포트")
-    pass
+col1, col2 = st.columns([1, 1])
+with col1:
+    st.subheader("🔄 실시간 스캔 현황")
+    st.info(st.session_state.gs.progress_text)
+    st.progress(st.session_state.gs.progress_perc)
 
-elif app_mode == "실시간 감시 (현재 시장 감시)":
-    st.success("서버가 백그라운드에서 전 종목을 감시하고 있습니다.")
-    
-    # --- [추가] 실시간 진행 상황 및 포착 데이터 UI ---
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("🔄 실시간 스캔 진행률")
-        prog_placeholder = st.empty()
-        bar_placeholder = st.empty()
-        
-        # UI 업데이트용 루프 (이 부분이 화면을 갱신함)
-        prog_placeholder.markdown(f"**상태:** {st.session_state.gs.progress_text}")
-        bar_placeholder.progress(st.session_state.gs.progress_perc)
+with col2:
+    st.subheader("🔥 실시간 포착 리스트")
+    if st.session_state.gs.hit_list:
+        df_hits = pd.DataFrame(st.session_state.gs.hit_list)
+        st.table(df_hits.tail(10))
+        csv = df_hits.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 데이터 다운로드", csv, "hits.csv", "text/csv")
+    else:
+        st.write("포착 대기 중...")
 
-    with col2:
-        st.subheader("🔥 실시간 포착 리스트 (자동 저장됨)")
-        if st.session_state.gs.hit_list:
-            df_hits = pd.DataFrame(st.session_state.gs.hit_list)
-            st.table(df_hits.tail(10)) # 최근 10개 표시
-            
-            # CSV 다운로드 버튼 제공
-            csv = df_hits.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 전체 포착 데이터 다운로드", csv, "hits.csv", "text/csv")
-        else:
-            st.write("아직 포착된 종목이 없습니다.")
-
-    # 5초마다 UI 강제 새로고침
-    time.sleep(5)
-    st.rerun()
+time.sleep(5)
+st.rerun()
