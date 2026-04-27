@@ -116,7 +116,7 @@ def get_safe_val(data):
     return float(data)
 
 def check_strategy(df, ticker):
-    if df is None or len(df) < 21: return False, 0, 0
+    if df is None or len(df) < 50: return False, 0, 0
     try:
         curr_close = get_safe_val(df['Close'])
         curr_vol = get_safe_val(df['Volume'])
@@ -126,15 +126,15 @@ def check_strategy(df, ticker):
         vol_ratio = curr_vol / vol_avg
         curr_value = curr_close * curr_vol
         ma5 = get_safe_val(df['Close'].rolling(window=5).mean())
-        ma20 = get_safe_val(df['Close'].rolling(window=20).mean())
-        std20 = get_safe_val(df['Close'].rolling(window=20).std())
+        ma20 = get_safe_val(df['Close'].rolling(window=10).mean())
+        std20 = get_safe_val(df['Close'].rolling(window=10).std())
         upper_band = ma20 + (std20 * 2)
         
         c1 = vol_ratio >= VOL_RATIO_THRESHOLD
         c2 = curr_close > upper_band
         c3 = curr_close > ma5
         c4 = curr_value >= MIN_VALUE_THRESHOLD
-        return True, vol_ratio, curr_close
+        return (c1 and c2 and c3 and c4), vol_ratio, curr_close
     except: return False, 0, 0
 
 # --- 감시 엔진 ---
