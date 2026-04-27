@@ -156,36 +156,43 @@ def monitor_engine(state_obj):
             state_obj.progress_text = f"스캔 중: {progress_count} / {total_count} ({state_obj.progress_perc*100:.1f}%)"
 
             try:
+                # 1. 데이터 다운로드
                 df_all = yf.download(batch, period="7d", interval="5m", progress=False, group_by='ticker', prepost=True, threads=False, timeout=15)
+                
                 for ticker in batch:
-                    for ticker in batch:
                     try:
-                        # --- [여기부터 교체 시작!] ---
-                        # 1. 멀티 티커 데이터에서 해당 종목만 안전하게 추출 (xs 사용)
+                        # 2. 데이터 추출 (xs 사용으로 nan 방지)
                         if len(batch) > 1:
                             if ticker not in df_all.columns.get_level_values(0): continue
-                            df = df_all.xs(ticker, axis=1, level=0) # level=0으로 수정
+                            df = df_all.xs(ticker, axis=1, level=0)
                         else:
                             df = df_all
                         
-                        # 2. 데이터가 없거나 nan만 가득한 경우 스킵
                         if df is None or df.empty: continue
                         
-                        # 3. 'Close', 'Volume' 컬럼에 nan이 있으면 그 행은 지우고 계산
+                        # 3. 데이터 정제 (nan 행 제거)
                         df = df.dropna(subset=['Close', 'Volume'])
                         
-                        # 4. 지표 계산에 필요한 최소 데이터(7일 5분봉은 넉넉해야 함) 확인
-                        if len(df) < 30: continue
+                        # 4. 최소 데이터 확인 및 중복 알림 방지
+                        if len(df) < 30 or ticker in already_sent_today: continue
+                        
+                        # [가장 중요!] 5. 전략 계산 호출 (이 부분이 빠져있었습니다)
+                        is_hit, v_ratio, price = check_strategy(df, ticker)
+                        
                         if is_hit:
                             print(f"🔥 [포착] {ticker} | {v_ratio:.1f}배", flush=True)
                             send_telegram_msg(f"🚀 [포착] {ticker}\n거래량: {v_ratio:.1f}배\n가격: ${price:.2f}\n시간: {datetime.now().strftime('%H:%M:%S')}")
                             state_obj.add_hit(ticker, v_ratio, price)
                             already_sent_today.add(ticker)
-                    except: continue
-                time.sleep(2) # 배치 간 안전 휴식
+                    except Exception as e:
+                        # 개별 종목 에러는 무시하고 다음 종목으로
+                        continue
+                
+                time.sleep(1) # 배치 간 약간의 휴식
             except Exception as e:
                 if "Rate limited" in str(e):
-                    time.sleep(600) # 차단 시 10분 휴식
+                    state_obj.progress_text = "⚠️ 차단 감지! 10분 휴식..."
+                    time.sleep(600)
                 continue
         
         state_obj.progress_text = f"✅ {datetime.now().strftime('%H:%M:%S')} 완주! 90초 후 재시작"
