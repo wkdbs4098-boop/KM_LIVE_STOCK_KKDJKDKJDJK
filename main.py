@@ -93,8 +93,8 @@ def send_telegram_msg(message):
 st.set_page_config(page_title="자윤 Stock AI V3.5", layout="wide")
 st.title("🚀 미국 주식 24H 전수조사 시스템")
 
-VOL_RATIO_THRESHOLD = 1.5
-MIN_VALUE_THRESHOLD = 100000 
+VOL_RATIO_THRESHOLD = 0.1
+MIN_VALUE_THRESHOLD = 10 
 
 @st.cache_data(ttl=86400)
 def get_all_market_tickers():
